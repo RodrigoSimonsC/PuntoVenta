@@ -1,0 +1,697 @@
+-- ==========================================
+-- Base de datos para Supabase (PostgreSQL)
+-- Sistema de Inventario / Punto de Venta
+-- ==========================================
+
+-- Extensión para UUID (ya viene disponible en Supabase)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ==========================================
+-- TABLA: productos
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS productos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nombre VARCHAR(255) NOT NULL,
+    precio_venta DECIMAL(10,2) NOT NULL,
+    costo_unitario DECIMAL(10,2) NOT NULL DEFAULT 0,
+    categoria VARCHAR(255),
+    imagen_url TEXT,
+    stock_tienda INTEGER NOT NULL DEFAULT 0,
+    stock_almacen INTEGER NOT NULL DEFAULT 0,
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- TABLA: movimientos_inventario
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS movimientos_inventario (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    producto_id UUID NOT NULL REFERENCES productos(id)
+        ON DELETE CASCADE
+        ON UPDATE NO ACTION,
+
+    tipo VARCHAR(30) NOT NULL,
+
+    delta_stock_tienda INTEGER NOT NULL DEFAULT 0,
+    delta_stock_almacen INTEGER NOT NULL DEFAULT 0,
+
+    nota TEXT,
+
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- TABLA: lotes
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS lotes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    nombre VARCHAR(255) NOT NULL,
+    nota TEXT,
+
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- TABLA: lote_productos
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS lote_productos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    lote_id UUID NOT NULL REFERENCES lotes(id)
+        ON DELETE CASCADE
+        ON UPDATE NO ACTION,
+
+    producto_id UUID NOT NULL REFERENCES productos(id)
+        ON DELETE CASCADE
+        ON UPDATE NO ACTION,
+
+    cantidad_loteada INTEGER NOT NULL DEFAULT 0,
+    cantidad_vendida INTEGER NOT NULL DEFAULT 0,
+
+    valor_inicial DECIMAL(10,2) NOT NULL DEFAULT 0,
+    inversion_inicial DECIMAL(10,2) NOT NULL DEFAULT 0,
+    ganancia_inicial DECIMAL(10,2) NOT NULL DEFAULT 0,
+
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT lote_productos_unique UNIQUE (lote_id, producto_id)
+);
+
+-- Permite eliminar un producto aunque siga asociado a un lote.
+ALTER TABLE public.lote_productos
+    DROP CONSTRAINT IF EXISTS lote_productos_producto_id_fkey;
+
+ALTER TABLE public.lote_productos
+    ADD CONSTRAINT lote_productos_producto_id_fkey
+    FOREIGN KEY (producto_id) REFERENCES public.productos(id)
+    ON DELETE CASCADE
+    ON UPDATE NO ACTION;
+
+DROP TRIGGER IF EXISTS prevent_duplicate_product_lot_trigger ON public.lote_productos;
+DROP FUNCTION IF EXISTS public.prevent_duplicate_product_lot();
+
+-- ==========================================
+-- TABLA: cuentas_por_cobrar
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    titular VARCHAR(255) NOT NULL,
+    telefono VARCHAR(50),
+    nota TEXT,
+
+    saldo_inicial DECIMAL(10,2) NOT NULL DEFAULT 0,
+    saldo_actual DECIMAL(10,2) NOT NULL DEFAULT 0,
+
+    estado VARCHAR(20) NOT NULL DEFAULT 'activa',
+
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- TABLA: ventas
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS ventas (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    fecha_hora TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    metodo_pago VARCHAR(30) NOT NULL,
+    cliente_nota TEXT,
+
+    cuenta_por_cobrar_id UUID REFERENCES cuentas_por_cobrar(id)
+        ON DELETE SET NULL
+        ON UPDATE NO ACTION,
+
+    total DECIMAL(10,2) NOT NULL DEFAULT 0,
+
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- TABLA: movimientos_cuenta
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS movimientos_cuenta (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    cuenta_id UUID NOT NULL REFERENCES cuentas_por_cobrar(id)
+        ON DELETE CASCADE
+        ON UPDATE NO ACTION,
+
+    tipo VARCHAR(20) NOT NULL,
+
+    monto DECIMAL(10,2) NOT NULL,
+
+    nota TEXT,
+
+    venta_id UUID REFERENCES ventas(id)
+        ON DELETE SET NULL
+        ON UPDATE NO ACTION,
+
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- TABLA: venta_detalles
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS venta_detalles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    venta_id UUID NOT NULL REFERENCES ventas(id)
+        ON DELETE CASCADE
+        ON UPDATE NO ACTION,
+
+    producto_id UUID NOT NULL REFERENCES productos(id)
+        ON DELETE RESTRICT
+        ON UPDATE NO ACTION,
+
+    lote_id UUID REFERENCES lotes(id)
+        ON DELETE SET NULL
+        ON UPDATE NO ACTION,
+
+    cantidad INTEGER NOT NULL,
+
+    precio_unitario DECIMAL(10,2) NOT NULL,
+
+    subtotal DECIMAL(10,2) NOT NULL
+);
+
+-- ==========================================
+-- TABLA: asignacion_deuda_lotes
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS asignacion_deuda_lotes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    cuenta_id UUID NOT NULL REFERENCES cuentas_por_cobrar(id)
+        ON DELETE CASCADE
+        ON UPDATE NO ACTION,
+
+    lote_id UUID REFERENCES lotes(id)
+        ON DELETE SET NULL
+        ON UPDATE NO ACTION,
+
+    monto_pendiente DECIMAL(10,2) NOT NULL DEFAULT 0,
+
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT asignacion_deuda_lotes_unique UNIQUE (cuenta_id, lote_id)
+);
+
+-- ==========================================
+-- ÍNDICES (Recomendado para Supabase)
+-- ==========================================
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_producto
+ON movimientos_inventario(producto_id);
+
+CREATE INDEX IF NOT EXISTS idx_lote_productos_lote
+ON lote_productos(lote_id);
+
+CREATE INDEX IF NOT EXISTS idx_lote_productos_producto
+ON lote_productos(producto_id);
+
+CREATE INDEX IF NOT EXISTS idx_ventas_cuenta
+ON ventas(cuenta_por_cobrar_id);
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_cuenta
+ON movimientos_cuenta(cuenta_id);
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_venta
+ON movimientos_cuenta(venta_id);
+
+CREATE INDEX IF NOT EXISTS idx_detalles_venta
+ON venta_detalles(venta_id);
+
+CREATE INDEX IF NOT EXISTS idx_detalles_producto
+ON venta_detalles(producto_id);
+
+CREATE INDEX IF NOT EXISTS idx_detalles_lote
+ON venta_detalles(lote_id);
+
+CREATE INDEX IF NOT EXISTS idx_asignacion_cuenta
+ON asignacion_deuda_lotes(cuenta_id);
+
+CREATE INDEX IF NOT EXISTS idx_asignacion_lote
+ON asignacion_deuda_lotes(lote_id);
+
+-- ==========================================
+-- POLÍTICAS RLS PARA LA APP POS
+-- ==========================================
+
+ALTER TABLE productos ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS productos_anon_select ON productos;
+CREATE POLICY productos_anon_select
+ON productos
+FOR SELECT
+TO anon
+USING (true);
+
+DROP POLICY IF EXISTS productos_anon_insert ON productos;
+CREATE POLICY productos_anon_insert
+ON productos
+FOR INSERT
+TO anon
+WITH CHECK (true);
+
+ALTER TABLE ventas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ventas_anon_select ON ventas;
+CREATE POLICY ventas_anon_select ON ventas FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS ventas_anon_insert ON ventas;
+CREATE POLICY ventas_anon_insert ON ventas FOR INSERT TO anon WITH CHECK (true);
+
+ALTER TABLE venta_detalles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS venta_detalles_anon_insert ON venta_detalles;
+CREATE POLICY venta_detalles_anon_insert ON venta_detalles FOR INSERT TO anon WITH CHECK (true);
+
+ALTER TABLE cuentas_por_cobrar ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cuentas_anon_select ON cuentas_por_cobrar;
+CREATE POLICY cuentas_anon_select ON cuentas_por_cobrar FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS cuentas_anon_insert ON cuentas_por_cobrar;
+CREATE POLICY cuentas_anon_insert ON cuentas_por_cobrar FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS cuentas_anon_update ON cuentas_por_cobrar;
+CREATE POLICY cuentas_anon_update ON cuentas_por_cobrar FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+ALTER TABLE movimientos_cuenta ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS movimientos_cuenta_anon_insert ON movimientos_cuenta;
+CREATE POLICY movimientos_cuenta_anon_insert ON movimientos_cuenta FOR INSERT TO anon WITH CHECK (true);
+
+DROP POLICY IF EXISTS productos_anon_update ON productos;
+CREATE POLICY productos_anon_update ON productos FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS productos_anon_delete ON productos;
+CREATE POLICY productos_anon_delete ON productos FOR DELETE TO anon USING (true);
+
+ALTER TABLE movimientos_inventario ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS movimientos_inventario_anon_insert ON movimientos_inventario;
+CREATE POLICY movimientos_inventario_anon_insert ON movimientos_inventario FOR INSERT TO anon WITH CHECK (true);
+
+ALTER TABLE ventas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ventas_anon_delete ON ventas;
+CREATE POLICY ventas_anon_delete ON ventas FOR DELETE TO anon USING (true);
+DROP POLICY IF EXISTS ventas_anon_update ON ventas;
+CREATE POLICY ventas_anon_update ON ventas FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+ALTER TABLE venta_detalles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS venta_detalles_anon_select ON venta_detalles;
+CREATE POLICY venta_detalles_anon_select ON venta_detalles FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS venta_detalles_anon_delete ON venta_detalles;
+CREATE POLICY venta_detalles_anon_delete ON venta_detalles FOR DELETE TO anon USING (true);
+
+ALTER TABLE lotes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS lotes_anon_select ON lotes;
+CREATE POLICY lotes_anon_select ON lotes FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS lotes_anon_insert ON lotes;
+CREATE POLICY lotes_anon_insert ON lotes FOR INSERT TO anon WITH CHECK (true);
+
+ALTER TABLE lote_productos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS lote_productos_anon_select ON lote_productos;
+CREATE POLICY lote_productos_anon_select ON lote_productos FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS lote_productos_anon_insert ON lote_productos;
+CREATE POLICY lote_productos_anon_insert ON lote_productos FOR INSERT TO anon WITH CHECK (true);
+
+ALTER TABLE asignacion_deuda_lotes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS asignacion_deuda_lotes_anon_select ON asignacion_deuda_lotes;
+CREATE POLICY asignacion_deuda_lotes_anon_select ON asignacion_deuda_lotes FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS asignacion_deuda_lotes_anon_insert ON asignacion_deuda_lotes;
+CREATE POLICY asignacion_deuda_lotes_anon_insert ON asignacion_deuda_lotes FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS asignacion_deuda_lotes_anon_update ON asignacion_deuda_lotes;
+CREATE POLICY asignacion_deuda_lotes_anon_update ON asignacion_deuda_lotes FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- Permisos de PostgREST para la clave pública de la aplicación.
+GRANT SELECT, INSERT, UPDATE, DELETE ON productos TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ventas TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON venta_detalles TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON cuentas_por_cobrar TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON movimientos_cuenta TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON movimientos_inventario TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON lotes TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON lote_productos TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON asignacion_deuda_lotes TO anon;
+
+-- Corrección final para permitir el cobro desde la aplicación pública.
+ALTER TABLE public.ventas ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ventas_app_insert ON public.ventas;
+CREATE POLICY ventas_app_insert ON public.ventas
+FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS ventas_app_select ON public.ventas;
+CREATE POLICY ventas_app_select ON public.ventas
+FOR SELECT TO anon USING (true);
+
+ALTER TABLE public.venta_detalles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS venta_detalles_app_insert ON public.venta_detalles;
+CREATE POLICY venta_detalles_app_insert ON public.venta_detalles
+FOR INSERT TO anon WITH CHECK (true);
+
+ALTER TABLE public.productos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS productos_app_update ON public.productos;
+CREATE POLICY productos_app_update ON public.productos
+FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+GRANT SELECT, INSERT ON public.ventas TO anon;
+GRANT SELECT, INSERT ON public.venta_detalles TO anon;
+GRANT SELECT, UPDATE ON public.productos TO anon;
+
+-- ============================================================
+-- LIQUIDACION DE LOTES Y PAGOS PARCIALES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS liquidacion_configuraciones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nombre VARCHAR(120) NOT NULL,
+    propietario_nombre VARCHAR(120) NOT NULL DEFAULT 'Yo',
+    companero_nombre VARCHAR(120) NOT NULL DEFAULT 'Compañero',
+    porcentaje_ganancia_propietario DECIMAL(7,4) NOT NULL DEFAULT 0,
+    porcentaje_ganancia_companero DECIMAL(7,4) NOT NULL DEFAULT 0,
+    activa BOOLEAN NOT NULL DEFAULT true,
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT liquidacion_config_porcentajes CHECK (
+        porcentaje_ganancia_propietario >= 0 AND porcentaje_ganancia_companero >= 0 AND
+        porcentaje_ganancia_propietario + porcentaje_ganancia_companero <= 100
+    )
+);
+
+CREATE TABLE IF NOT EXISTS liquidaciones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    lote_id UUID NOT NULL REFERENCES lotes(id) ON DELETE RESTRICT,
+    corte_caja_id UUID,
+    configuracion_id UUID REFERENCES liquidacion_configuraciones(id) ON DELETE SET NULL,
+    propietario_nombre VARCHAR(120) NOT NULL,
+    companero_nombre VARCHAR(120) NOT NULL,
+    porcentaje_ganancia_propietario DECIMAL(7,4) NOT NULL DEFAULT 0,
+    porcentaje_ganancia_companero DECIMAL(7,4) NOT NULL DEFAULT 0,
+    inversion_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+    ventas_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+    ganancia_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+    estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT liquidacion_lote_corte_unique UNIQUE (lote_id, corte_caja_id)
+);
+
+CREATE TABLE IF NOT EXISTS liquidacion_conceptos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    liquidacion_id UUID NOT NULL REFERENCES liquidaciones(id) ON DELETE RESTRICT,
+    persona VARCHAR(120) NOT NULL,
+    concepto VARCHAR(60) NOT NULL,
+    monto_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT liquidacion_concepto_monto CHECK (monto_total >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS pagos_liquidacion (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    liquidacion_id UUID NOT NULL REFERENCES liquidaciones(id) ON DELETE RESTRICT,
+    concepto_id UUID NOT NULL REFERENCES liquidacion_conceptos(id) ON DELETE RESTRICT,
+    corte_caja_id UUID,
+    persona VARCHAR(120) NOT NULL,
+    concepto VARCHAR(60) NOT NULL,
+    monto DECIMAL(12,2) NOT NULL,
+    estado VARCHAR(20) NOT NULL DEFAULT 'activo',
+    pago_reversion_id UUID REFERENCES pagos_liquidacion(id) ON DELETE RESTRICT,
+    nota TEXT,
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pago_liquidacion_monto CHECK (monto > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_liquidaciones_lote ON liquidaciones(lote_id);
+CREATE INDEX IF NOT EXISTS idx_liquidaciones_corte ON liquidaciones(corte_caja_id);
+CREATE INDEX IF NOT EXISTS idx_liquidacion_conceptos_liquidacion ON liquidacion_conceptos(liquidacion_id);
+CREATE INDEX IF NOT EXISTS idx_pagos_liquidacion_liquidacion ON pagos_liquidacion(liquidacion_id);
+
+ALTER TABLE liquidacion_configuraciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE liquidaciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE liquidacion_conceptos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pagos_liquidacion ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE table_name TEXT;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY['liquidacion_configuraciones', 'liquidaciones', 'liquidacion_conceptos', 'pagos_liquidacion'] LOOP
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO anon', table_name);
+        EXECUTE format('DROP POLICY IF EXISTS pos_anon_select ON public.%I', table_name);
+        EXECUTE format('CREATE POLICY pos_anon_select ON public.%I FOR SELECT TO anon USING (true)', table_name);
+        EXECUTE format('DROP POLICY IF EXISTS pos_anon_insert ON public.%I', table_name);
+        EXECUTE format('CREATE POLICY pos_anon_insert ON public.%I FOR INSERT TO anon WITH CHECK (true)', table_name);
+        EXECUTE format('DROP POLICY IF EXISTS pos_anon_update ON public.%I', table_name);
+        EXECUTE format('CREATE POLICY pos_anon_update ON public.%I FOR UPDATE TO anon USING (true) WITH CHECK (true)', table_name);
+        EXECUTE format('DROP POLICY IF EXISTS pos_anon_delete ON public.%I', table_name);
+        EXECUTE format('CREATE POLICY pos_anon_delete ON public.%I FOR DELETE TO anon USING (true)', table_name);
+    END LOOP;
+END $$;
+
+INSERT INTO liquidacion_configuraciones (nombre, propietario_nombre, companero_nombre, porcentaje_ganancia_propietario, porcentaje_ganancia_companero)
+SELECT 'Configuración inicial', 'Yo', 'Compañero', 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM liquidacion_configuraciones);
+
+REVOKE DELETE ON public.liquidaciones FROM anon;
+REVOKE DELETE ON public.liquidacion_conceptos FROM anon;
+REVOKE DELETE ON public.pagos_liquidacion FROM anon;
+DROP POLICY IF EXISTS pos_anon_delete ON public.liquidaciones;
+DROP POLICY IF EXISTS pos_anon_delete ON public.liquidacion_conceptos;
+DROP POLICY IF EXISTS pos_anon_delete ON public.pagos_liquidacion;
+
+
+
+//Agregados:
+-- ============================================================
+-- TABLAS NUEVAS PARA CORTE DE CAJA
+-- PostgreSQL / Supabase
+-- ============================================================
+
+-- ============================================================
+-- 1. CORTES DE CAJA
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS cortes_caja (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    fecha_apertura TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fecha_cierre TIMESTAMP,
+
+    efectivo_inicial DECIMAL(10,2) NOT NULL DEFAULT 0,
+    efectivo_esperado DECIMAL(10,2) NOT NULL DEFAULT 0,
+    efectivo_contado DECIMAL(10,2) NOT NULL DEFAULT 0,
+    diferencia DECIMAL(10,2) NOT NULL DEFAULT 0,
+
+    total_ventas_efectivo DECIMAL(10,2) NOT NULL DEFAULT 0,
+    total_ventas_tarjeta DECIMAL(10,2) NOT NULL DEFAULT 0,
+    total_ventas_transferencia DECIMAL(10,2) NOT NULL DEFAULT 0,
+
+    observaciones TEXT,
+
+    estado VARCHAR(20) NOT NULL DEFAULT 'abierto',
+
+    creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actualizado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- ============================================================
+-- 2. RELACIÓN ENTRE VENTAS Y CORTES DE CAJA
+-- ============================================================
+
+ALTER TABLE ventas
+ADD COLUMN IF NOT EXISTS corte_caja_id UUID;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_ventas_corte'
+    ) THEN
+
+        ALTER TABLE ventas
+        ADD CONSTRAINT fk_ventas_corte
+        FOREIGN KEY (corte_caja_id)
+        REFERENCES cortes_caja(id)
+        ON UPDATE NO ACTION
+        ON DELETE SET NULL;
+
+    END IF;
+END $$;
+
+
+-- ============================================================
+-- 3. DENOMINACIONES DEL CORTE DE CAJA
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS corte_caja_denominaciones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    corte_caja_id UUID NOT NULL,
+
+    denominacion DECIMAL(10,2) NOT NULL,
+
+    tipo VARCHAR(10) NOT NULL,
+
+    cantidad INTEGER NOT NULL DEFAULT 0,
+
+    subtotal DECIMAL(10,2) NOT NULL DEFAULT 0,
+
+    CONSTRAINT fk_denominaciones_corte
+        FOREIGN KEY (corte_caja_id)
+        REFERENCES cortes_caja(id)
+        ON UPDATE NO ACTION
+        ON DELETE CASCADE
+);
+
+
+-- ============================================================
+-- 4. ÍNDICES
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_ventas_corte
+ON ventas(corte_caja_id);
+
+CREATE INDEX IF NOT EXISTS idx_denominaciones_corte
+ON corte_caja_denominaciones(corte_caja_id);
+
+-- ============================================================
+-- REPARACION DE ACCESO PARA LA APP PUBLICA
+-- Ejecutar este bloque en el SQL Editor de Supabase.
+-- La aplicacion usa la clave publica y, por tanto, el rol anon.
+-- ============================================================
+
+GRANT USAGE ON SCHEMA public TO anon;
+
+DO $$
+DECLARE
+    table_name TEXT;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY[
+        'productos',
+        'movimientos_inventario',
+        'lotes',
+        'lote_productos',
+        'cuentas_por_cobrar',
+        'ventas',
+        'movimientos_cuenta',
+        'venta_detalles',
+        'asignacion_deuda_lotes'
+    ] LOOP
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO anon', table_name);
+    END LOOP;
+END $$;
+
+DROP POLICY IF EXISTS pos_anon_select ON public.productos;
+CREATE POLICY pos_anon_select ON public.productos FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.productos;
+CREATE POLICY pos_anon_insert ON public.productos FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_update ON public.productos;
+CREATE POLICY pos_anon_update ON public.productos FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_delete ON public.productos;
+CREATE POLICY pos_anon_delete ON public.productos FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.movimientos_inventario;
+CREATE POLICY pos_anon_select ON public.movimientos_inventario FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.movimientos_inventario;
+CREATE POLICY pos_anon_insert ON public.movimientos_inventario FOR INSERT TO anon WITH CHECK (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.lotes;
+CREATE POLICY pos_anon_select ON public.lotes FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.lotes;
+CREATE POLICY pos_anon_insert ON public.lotes FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_update ON public.lotes;
+CREATE POLICY pos_anon_update ON public.lotes FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_delete ON public.lotes;
+CREATE POLICY pos_anon_delete ON public.lotes FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.lote_productos;
+CREATE POLICY pos_anon_select ON public.lote_productos FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.lote_productos;
+CREATE POLICY pos_anon_insert ON public.lote_productos FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_update ON public.lote_productos;
+CREATE POLICY pos_anon_update ON public.lote_productos FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_delete ON public.lote_productos;
+CREATE POLICY pos_anon_delete ON public.lote_productos FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.cuentas_por_cobrar;
+CREATE POLICY pos_anon_select ON public.cuentas_por_cobrar FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.cuentas_por_cobrar;
+CREATE POLICY pos_anon_insert ON public.cuentas_por_cobrar FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_update ON public.cuentas_por_cobrar;
+CREATE POLICY pos_anon_update ON public.cuentas_por_cobrar FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_delete ON public.cuentas_por_cobrar;
+CREATE POLICY pos_anon_delete ON public.cuentas_por_cobrar FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.ventas;
+CREATE POLICY pos_anon_select ON public.ventas FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.ventas;
+CREATE POLICY pos_anon_insert ON public.ventas FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_update ON public.ventas;
+CREATE POLICY pos_anon_update ON public.ventas FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_delete ON public.ventas;
+CREATE POLICY pos_anon_delete ON public.ventas FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.movimientos_cuenta;
+CREATE POLICY pos_anon_select ON public.movimientos_cuenta FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.movimientos_cuenta;
+CREATE POLICY pos_anon_insert ON public.movimientos_cuenta FOR INSERT TO anon WITH CHECK (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.venta_detalles;
+CREATE POLICY pos_anon_select ON public.venta_detalles FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.venta_detalles;
+CREATE POLICY pos_anon_insert ON public.venta_detalles FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_update ON public.venta_detalles;
+CREATE POLICY pos_anon_update ON public.venta_detalles FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_delete ON public.venta_detalles;
+CREATE POLICY pos_anon_delete ON public.venta_detalles FOR DELETE TO anon USING (true);
+
+DROP POLICY IF EXISTS pos_anon_select ON public.asignacion_deuda_lotes;
+CREATE POLICY pos_anon_select ON public.asignacion_deuda_lotes FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS pos_anon_insert ON public.asignacion_deuda_lotes;
+CREATE POLICY pos_anon_insert ON public.asignacion_deuda_lotes FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_update ON public.asignacion_deuda_lotes;
+CREATE POLICY pos_anon_update ON public.asignacion_deuda_lotes FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS pos_anon_delete ON public.asignacion_deuda_lotes;
+CREATE POLICY pos_anon_delete ON public.asignacion_deuda_lotes FOR DELETE TO anon USING (true);
+
+-- Permisos para apertura y cierre de caja desde la app.
+ALTER TABLE public.cortes_caja ENABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cortes_caja TO anon;
+DROP POLICY IF EXISTS cortes_caja_anon_select ON public.cortes_caja;
+CREATE POLICY cortes_caja_anon_select ON public.cortes_caja FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS cortes_caja_anon_insert ON public.cortes_caja;
+CREATE POLICY cortes_caja_anon_insert ON public.cortes_caja FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS cortes_caja_anon_update ON public.cortes_caja;
+CREATE POLICY cortes_caja_anon_update ON public.cortes_caja FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS cortes_caja_anon_delete ON public.cortes_caja;
+CREATE POLICY cortes_caja_anon_delete ON public.cortes_caja FOR DELETE TO anon USING (true);
+
+ALTER TABLE public.corte_caja_denominaciones ENABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.corte_caja_denominaciones TO anon;
+DROP POLICY IF EXISTS corte_denominaciones_anon_select ON public.corte_caja_denominaciones;
+CREATE POLICY corte_denominaciones_anon_select ON public.corte_caja_denominaciones FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS corte_denominaciones_anon_insert ON public.corte_caja_denominaciones;
+CREATE POLICY corte_denominaciones_anon_insert ON public.corte_caja_denominaciones FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS corte_denominaciones_anon_update ON public.corte_caja_denominaciones;
+CREATE POLICY corte_denominaciones_anon_update ON public.corte_caja_denominaciones FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS corte_denominaciones_anon_delete ON public.corte_caja_denominaciones;
+CREATE POLICY corte_denominaciones_anon_delete ON public.corte_caja_denominaciones FOR DELETE TO anon USING (true);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_liquidaciones_corte') THEN
+        ALTER TABLE public.liquidaciones ADD CONSTRAINT fk_liquidaciones_corte FOREIGN KEY (corte_caja_id) REFERENCES public.cortes_caja(id) ON DELETE SET NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_pagos_liquidacion_corte') THEN
+        ALTER TABLE public.pagos_liquidacion ADD CONSTRAINT fk_pagos_liquidacion_corte FOREIGN KEY (corte_caja_id) REFERENCES public.cortes_caja(id) ON DELETE SET NULL;
+    END IF;
+END $$;

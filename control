@@ -1,0 +1,461 @@
+Quiero que analices y desarrolles una nueva funcionalidad para mi sistema de punto de venta (POS).
+CONTEXTO DEL NEGOCIO
+Trabajo con un compañero en un negocio de venta de dulces.
+El modelo de trabajo es el siguiente:
+
+Yo compro y financio todo el producto.
+Mi compañero se encarga principalmente de vender.
+Por lo tanto, la distribución del dinero NO debe asumir automáticamente que todo se divide 50/50.
+Necesito poder configurar cuánto corresponde a cada persona y, especialmente, distinguir entre:
+
+Recuperación de mi inversión.
+Ganancia que me corresponde.
+Pago o ganancia que corresponde a mi compañero.
+Dinero que todavía queda pendiente de repartir.
+
+
+Trabajo con productos organizados por LOTES.
+Cada semana puedo comprar/restockear nuevos productos, por lo que necesito poder identificar exactamente a qué lote pertenece cada producto y cuánto dinero generó cada lote.
+
+PROBLEMA ACTUAL
+Actualmente tengo cortes de caja.
+Normalmente comenzamos un periodo de ventas al inicio de la semana y hacemos el corte al finalizar la semana, aproximadamente el viernes.
+Al realizar el corte tengo:
+
+Dinero total vendido.
+Productos vendidos.
+Productos restantes.
+Costos de los productos.
+Ganancia generada.
+Información del lote.
+
+El problema es que después del corte necesito decidir qué hacer con el dinero.
+Por ejemplo:
+Supongamos que un lote tuvo:
+
+Inversión: $1,000
+Ventas: $1,500
+Ganancia: $500
+
+No necesariamente quiero retirar todo el dinero inmediatamente.
+Puedo decidir:
+
+Recuperar primero parte de mi inversión.
+Pagarle a mi compañero una parte de lo que le corresponde.
+Pagarme una parte de lo que me corresponde.
+Dejar una cantidad dentro del negocio.
+Hacer pagos parciales durante varias semanas.
+
+Por ejemplo:
+Semana 1:
+
+Me recupero $500.
+Le pago $250 a mi compañero.
+Quedan cantidades pendientes.
+
+Semana 2:
+
+Me recupero otros $500.
+Le pago los $250 restantes a mi compañero.
+
+Entonces el sistema debe saber que:
+
+Mi inversión de ese lote ya fue recuperada completamente.
+Mi compañero ya recibió todo lo que le correspondía.
+El lote está completamente liquidado.
+
+No quiero depender de memoria ni de cálculos manuales.
+OBJETIVO PRINCIPAL
+Quiero crear un módulo llamado, por ejemplo:
+"Liquidación de lotes"
+o
+"Distribución y liquidación"
+que esté conectado con:
+
+Lotes.
+Productos.
+Ventas.
+Cortes de caja.
+Inversión/costo.
+Ganancias.
+Pagos realizados.
+Saldos pendientes.
+
+El sistema debe permitirme tomar un corte de caja y decidir cómo distribuir el dinero disponible.
+FUNCIONALIDAD QUE QUIERO
+Después de realizar un corte de caja debe existir una opción:
+"Liquidar corte"
+Al entrar debe mostrar un resumen financiero.
+Ejemplo:
+LOTE #2026-09-01
+Inversión:
+$1,000
+Ventas:
+$1,500
+Costo recuperable:
+$1,000
+Ganancia:
+$500
+Dinero disponible:
+$1,500
+Después debe mostrar una sección de distribución.
+Ejemplo:
+Mi parte
+Concepto:
+
+Recuperación de inversión
+Ganancia
+
+Monto total correspondiente:
+$1,250
+Pagado:
+$500
+Pendiente:
+$750
+Parte del compañero
+Monto total correspondiente:
+$250
+Pagado:
+$0
+Pendiente:
+$250
+El usuario debe poder registrar cuánto dinero se está entregando en ese momento.
+Por ejemplo:
+"Registrar pago"
+Persona:
+Yo
+Concepto:
+Recuperación de inversión
+Monto:
+$500
+Fecha:
+[fecha automática]
+Notas:
+"Liquidación semana 1"
+Al guardar, el sistema debe actualizar automáticamente:
+Total correspondiente:
+$1,000
+Pagado:
+$500
+Pendiente:
+$500
+Y conservar el historial del pago.
+PAGOS PARCIALES
+Esta parte es MUY IMPORTANTE.
+Nunca se debe asumir que una obligación queda liquidada solamente porque se hizo un corte.
+Un lote puede tener múltiples pagos.
+Ejemplo:
+Lote:
+Inversión: $1,000
+Mi obligación de recuperación:
+$1,000
+Pagos:
+Semana 1:
+$300
+Semana 2:
+$400
+Semana 3:
+$300
+Total pagado:
+$1,000
+Pendiente:
+$0
+Estado:
+LIQUIDADO
+El sistema debe guardar todos los movimientos individualmente.
+ESTADOS
+Cada obligación debería poder tener estados como:
+
+Pendiente
+Parcialmente pagado
+Liquidado
+
+Y cada lote debería tener un estado general.
+Por ejemplo:
+Lote #001
+Inversión:
+$1,000
+Ventas:
+$1,500
+Ganancia:
+$500
+Liquidación:
+Yo:
+$1,000 / $1,000 recuperado
+Estado: Liquidado
+Compañero:
+$250 / $250 pagado
+Estado: Liquidado
+Ganancia restante:
+$250
+Estado general:
+Liquidado
+MUY IMPORTANTE: NO CONFUNDIR VENTAS, GANANCIA Y DINERO PAGADO
+Quiero que diseñes correctamente la lógica financiera.
+Una venta no significa automáticamente que ese dinero ya fue repartido.
+Por ejemplo:
+Ventas = $1,500
+Eso significa que entraron $1,500 al negocio.
+Pero puedo haber distribuido solamente $500.
+Por lo tanto:
+Ventas acumuladas:
+$1,500
+Dinero distribuido:
+$500
+Dinero pendiente de distribuir:
+$1,000
+El sistema debe mantener estas cantidades separadas.
+LOTES
+Cada lote debe conservar su información histórica.
+Por ejemplo:
+Lote #001
+Fecha de inicio:
+01/09/2026
+Fecha de cierre:
+05/09/2026
+Inversión:
+$1,000
+Ventas:
+$1,500
+Costo:
+$1,000
+Ganancia:
+$500
+Dinero distribuido:
+$750
+Dinero pendiente:
+$750
+Mi inversión recuperada:
+$500 / $1,000
+Mi compañero pagado:
+$250 / $250
+Estado:
+Parcialmente liquidado
+Esto debe permitir consultar posteriormente exactamente qué ocurrió con ese lote.
+HISTORIAL DE MOVIMIENTOS
+Quiero una especie de historial financiero:
+Lote #001
+01/09
+Compra de productos:
+-$1,000
+05/09
+Ventas:
++$1,500
+05/09
+Pago a mí:
+-$500
+05/09
+Pago a compañero:
+-$250
+Saldo pendiente de liquidación:
+$750
+12/09
+Pago a mí:
+-$500
+12/09
+Pago a compañero:
+-$250
+Lote liquidado.
+Cada movimiento debe tener:
+
+ID
+Lote
+Fecha
+Tipo de movimiento
+Persona
+Concepto
+Monto
+Usuario que realizó el movimiento
+Notas
+Referencia al corte de caja, si aplica
+
+CONFIGURACIÓN
+No quiero que el sistema esté programado exclusivamente para mi caso actual.
+Quiero que la distribución sea configurable.
+Por ejemplo, poder definir:
+Socio A:
+50%
+Socio B:
+50%
+O:
+Socio A:
+60%
+Socio B:
+40%
+Pero además debe poder distinguirse entre:
+
+Recuperación de capital.
+Ganancia.
+Pago al vendedor.
+Otros conceptos.
+
+La configuración debe poder cambiarse para nuevos lotes sin modificar los lotes históricos.
+MUY IMPORTANTE:
+Si cambio la configuración posteriormente, NO debe modificar las liquidaciones anteriores.
+Cada lote debe conservar las condiciones con las que fue creado.
+REGLAS DE SEGURIDAD FINANCIERA
+El sistema debe evitar:
+
+Registrar pagos mayores al saldo pendiente.
+Registrar pagos duplicados accidentalmente.
+Eliminar movimientos financieros sin dejar rastro.
+Modificar silenciosamente un pago histórico.
+Cambiar retroactivamente la distribución de un lote.
+Confundir dinero de caja con dinero ya distribuido.
+
+Si se necesita corregir un pago, debe existir un mecanismo de cancelación/reversión que conserve el historial.
+DASHBOARD DEL LOTE
+Quiero una pantalla donde pueda ver rápidamente:
+Lote #001
+Inversión:
+$1,000
+Ventas:
+$1,500
+Ganancia:
+$500
+Capital recuperado:
+$500 / $1,000
+Pagado al compañero:
+$250 / $250
+Total distribuido:
+$750
+Pendiente:
+$750
+Estado:
+Parcialmente liquidado
+Y una barra o indicador visual del progreso de liquidación.
+CORTE DE CAJA
+El corte debe seguir funcionando como actualmente.
+Pero al finalizar un corte debe existir la posibilidad de:
+"Crear liquidación"
+La liquidación debe tomar los datos del corte y generar una propuesta de distribución.
+No quiero duplicar manualmente información que ya existe en el corte.
+DISEÑO DE BASE DE DATOS
+Antes de programar la interfaz, analiza mi estructura actual de base de datos y determina qué tablas necesitan modificarse y cuáles nuevas deben crearse.
+Considera como mínimo conceptos como:
+
+lotes
+cortes_caja
+ventas
+productos
+movimientos de inventario
+liquidaciones
+conceptos de liquidación
+pagos de liquidación
+
+No crees tablas innecesarias.
+Quiero mantener una estructura normalizada y fácil de mantener.
+IMPORTANTE: NO ROMPER EL SISTEMA ACTUAL
+Antes de modificar código:
+
+Analiza la arquitectura existente.
+Identifica cómo funcionan actualmente:
+
+ventas
+cortes
+lotes
+inventario
+usuarios
+
+
+Explica qué partes serán modificadas.
+Explica qué partes serán nuevas.
+Detecta posibles conflictos con la lógica actual.
+Propón la estructura de datos.
+Después desarrolla la funcionalidad.
+
+No reemplaces funcionalidades existentes sin justificarlo.
+INTERFAZ
+Quiero una interfaz sencilla pero profesional.
+La pantalla podría tener:
+
+LIQUIDACIÓN DE LOTE #001
+Resumen
+Inversión        $1,000
+Ventas           $1,500
+Ganancia           $500
+
+DISTRIBUCIÓN
+         Total     Pagado    Pendiente
+
+Yo            $1,250     $500       $750
+Compañero       $250       $0       $250
+
+REGISTRAR PAGO
+Persona: [Yo ▼]
+Concepto: [Recuperación de inversión ▼]
+Monto: [$500]
+Notas: [________________]
+[Registrar pago]
+
+HISTORIAL
+Fecha | Persona | Concepto | Monto | Corte | Estado
+
+PROGRESO DE LIQUIDACIÓN
+[██████████------] 60%
+
+RESULTADO ESPERADO
+Quiero poder abrir cualquier lote meses después y responder inmediatamente:
+
+¿Cuánto invertí?
+¿Cuánto vendimos?
+¿Cuánto ganamos?
+¿Cuánto dinero ha generado?
+¿Cuánto dinero ya retiré?
+¿Cuánto dinero le he pagado a mi compañero?
+¿Cuánto me falta recuperar?
+¿Cuánto le falta recibir a mi compañero?
+¿Cuánto dinero queda pendiente de distribuir?
+¿Cuántos pagos se realizaron?
+¿Cuándo se realizó cada pago?
+¿De qué corte salió cada pago?
+¿El lote ya está completamente liquidado?
+
+ANTES DE PROGRAMAR
+No empieces directamente a escribir código.
+Primero quiero que:
+
+
+Analices el problema.
+
+
+Identifiques si mi modelo financiero tiene algún problema conceptual.
+
+
+Propongas el modelo correcto de datos.
+
+
+Propongas las tablas y relaciones.
+
+
+Expliques el flujo completo:
+Compra → Lote → Venta → Corte → Liquidación → Pagos parciales → Liquidación completa.
+
+
+Expliques cómo manejarías los pagos parciales.
+
+
+Expliques cómo evitarías inconsistencias financieras.
+
+
+Propongas la interfaz.
+
+
+Indiques qué archivos/clases existentes deberían modificarse.
+
+
+Esperes mi aprobación antes de implementar.
+
+
+Quiero que priorices:
+
+Integridad de los datos.
+Trazabilidad del dinero.
+Historial.
+Pagos parciales.
+Control por lote.
+No perder información.
+Facilidad de uso.
+Compatibilidad con mi POS actual.
+
+No quiero una solución genérica de "repartir ganancias". Quiero un sistema de control financiero por lote que me permita recuperar mi inversión y registrar progresivamente cuánto dinero ha recibido cada persona.
